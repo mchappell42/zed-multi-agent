@@ -8,6 +8,10 @@ use agent_client_protocol::schema::{MaybeUndefined, v1 as acp};
 use anyhow::{Context as _, Result, anyhow};
 use collections::HashSet;
 pub use connection::*;
+use db::sqlez::{
+    bindable::{Bind, Column},
+    statement::Statement,
+};
 pub use diff::*;
 use feature_flags::{AcpBetaFeatureFlag, FeatureFlagAppExt as _};
 use futures::{FutureExt, channel::oneshot, future::BoxFuture};
@@ -48,6 +52,41 @@ use util::{
     paths::{PathStyle, is_absolute},
 };
 use uuid::Uuid;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
+pub struct ThreadId(uuid::Uuid);
+
+impl ThreadId {
+    pub fn new() -> Self {
+        Self(uuid::Uuid::new_v4())
+    }
+
+    pub fn from_uuid(uuid: uuid::Uuid) -> Self {
+        Self(uuid)
+    }
+
+    pub fn as_uuid(&self) -> uuid::Uuid {
+        self.0
+    }
+
+    /// Stable, hyphenated string form suitable for use as a key.
+    pub fn to_key_string(&self) -> String {
+        self.0.hyphenated().to_string()
+    }
+}
+
+impl Bind for ThreadId {
+    fn bind(&self, statement: &Statement, start_index: i32) -> anyhow::Result<i32> {
+        self.0.bind(statement, start_index)
+    }
+}
+
+impl Column for ThreadId {
+    fn column(statement: &mut Statement, start_index: i32) -> anyhow::Result<(Self, i32)> {
+        let (uuid, next) = Column::column(statement, start_index)?;
+        Ok((ThreadId(uuid), next))
+    }
+}
 
 /// Returned when the model stops because it exhausted its output token budget.
 #[derive(Debug)]

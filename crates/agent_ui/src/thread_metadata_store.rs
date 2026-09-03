@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+pub use acp_thread::ThreadId;
 use agent::{ThreadStore, ZED_AGENT_ID};
 use agent_client_protocol::schema::v1 as acp;
 use anyhow::Context as _;
@@ -11,9 +12,7 @@ use collections::{HashMap, HashSet};
 use db::{
     kvp::KeyValueStore,
     sqlez::{
-        bindable::{Bind, Column},
-        domain::Domain,
-        statement::Statement,
+        bindable::Column, domain::Domain, statement::Statement,
         thread_safe_connection::ThreadSafeConnection,
     },
     sqlez_macros::sql,
@@ -29,33 +28,6 @@ use util::ResultExt as _;
 use workspace::{PathList, SerializedWorkspaceLocation, WorkspaceDb};
 
 use crate::DEFAULT_THREAD_TITLE;
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, serde::Serialize, serde::Deserialize)]
-pub struct ThreadId(uuid::Uuid);
-
-impl ThreadId {
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4())
-    }
-
-    /// Stable, hyphenated string form suitable for use as a key.
-    pub fn to_key_string(&self) -> String {
-        self.0.hyphenated().to_string()
-    }
-}
-
-impl Bind for ThreadId {
-    fn bind(&self, statement: &Statement, start_index: i32) -> anyhow::Result<i32> {
-        self.0.bind(statement, start_index)
-    }
-}
-
-impl Column for ThreadId {
-    fn column(statement: &mut Statement, start_index: i32) -> anyhow::Result<(Self, i32)> {
-        let (uuid, next) = Column::column(statement, start_index)?;
-        Ok((ThreadId(uuid), next))
-    }
-}
 
 const THREAD_REMOTE_CONNECTION_MIGRATION_KEY: &str = "thread-metadata-remote-connection-backfill";
 const THREAD_ID_MIGRATION_KEY: &str = "thread-metadata-thread-id-backfill";
@@ -440,7 +412,7 @@ impl From<&ThreadMetadata> for acp_thread::AgentSessionInfo {
         let session_id = meta
             .session_id
             .clone()
-            .unwrap_or_else(|| acp::SessionId::new(meta.thread_id.0.to_string()));
+            .unwrap_or_else(|| acp::SessionId::new(meta.thread_id.as_uuid().to_string()));
         Self {
             session_id,
             work_dirs: Some(meta.folder_paths().clone()),
@@ -1766,7 +1738,7 @@ impl Column for ThreadMetadata {
         let worktree_paths = WorktreePaths::from_path_lists(main_worktree_paths, folder_paths)
             .unwrap_or_else(|_| WorktreePaths::default());
 
-        let thread_id = ThreadId(thread_id_uuid);
+        let thread_id = ThreadId::from_uuid(thread_id_uuid);
 
         Ok((
             ThreadMetadata {
